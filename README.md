@@ -1,47 +1,83 @@
-# db-test
+- PostgreSQL CTE
+- 結論
+- CTEとは
+    - 解説
+    - 書き方
+- 再帰の書き方
+    - 親と子関係をもつ１つのテーブルを再帰CTEで調べる方法
+- マテリアライズオプション
+    - PostgreSQL 12でパフォーマンスが改善した話
+        - 基本的にはマテリアライズするものだった。
+- 一時ビューとの使い分け
+    - フローチャート用意できればよりよいか。
+- まとめ
 
-# 使える関数たち
+# PostgreSQLの共通テーブル式（CTE）について
 
-## generate_series()
+本記事ではPostgreSQLの共通テーブル式（Common Table Expressions）について、調べてみたので記事にしたいと思います。
+
+なお、本記事では共通テーブル式のことをCTEを呼称することにします。
+
+## 結論
+
+複数回同じ処理を書くならCTEにするとパフォーマンスが向上するケースがある。
+
+ネストはできるだけ避けろ。
+
+部品に分解して、レビュアーを助けろ
+
+## CTEとは
+
+CTEとは最初でひとことで説明すると、「WITH句によって、1つのクエリ内のために存在する一時テーブルを定義できる。」です。
+
+WITH句内にはSELECT, INSERT, UPDATE, DELETEを取ることができ、メインクエリにはSELECT, INSERT, UPDATE, DELETEに加えてMARGEを使用することできますが、本記事では主にSELECTに絞って解説したいと思います。
+
+## CTEの書き方
+
+下記のような構文で、WITH句による一時テーブルの定義とメインクエリでそれを使用することができます。
+
+月ごとの給料を記録したemployees_salaryテーブルから2024年の合計を取得しイッセンマン以上の社員一覧を取得するクエリです。
 
 ```sql
-SELECT generate_series(1,10); -- 1,2,3,4,5,6,7,8,9,10
+WITH 2024_salary_total AS (
+	SELECT 
+		employeeid, 
+		sum(salary) as total_salary,
+	FROM 
+		employees_salary
+	WHERE 
+		term = '2024'
+	GROUP BY 
+		employeeid
+)
+SELECT 
+	employeeid 
+FROM 
+	2024_salary_total 
+WHERE total_salary >= 10,000,000;
 ```
 
-で 1~10 の連続値を生成する。
-第三引数を指定することで、刻み幅を指定することもできる。
+CTEを使用しない場合
 
 ```sql
-SELECT generate_series(1,10,2) -- 1,3,5,7,9
+SELECT 
+    employeeid
+FROM 
+  (
+    SELECT 
+      employeeid, 
+      SUM(salary) AS total_salary
+    FROM 
+      employees_salary
+    WHERE 
+      term = '2024'
+    GROUP BY 
+      employeeid
+  ) AS salary_summary
+WHERE 
+  total_salary >= 10000000;
 ```
 
-## lpad() rpad()
+このくらいのクエリなら可読性はあまり変わらないのですが、CTEを使った場合ネストが1つ浅いことはわかると思います。
 
-文字列を指定された長さに拡張し、指定した文字で埋める関数。
-lpad は前(左)埋め rpad は後ろ(右)埋め
-
-```sql
-select lpad('12345', 8, 0); -- 00012345
-```
-
-第一引数に対象の文字列
-第二引数に長さ指定。（何文字にしたいか）
-第三引数になにの文字で埋めたいか。
-
-### generate_series と lpad の合わせ技
-
-```sql
-SELECT 'ユーザー' || lpad(gs :: text, 5, '0') FROM generate_series(1, 10000) gs;
-```
-
-gs :: text は generate_series()は Integer 型を返すのに対して lpad は文字列型を受取る関数のため
-text 型に cast するという記法。
-
-## 一時間ごとのタイムスタンプを生成する
-
-```sql
-SELECT
-  timestamp '2024-10-31 22:00:00' + '1 hour'::INTERVAL * i -- '2024-10-31'::timestampでも同義
-FROM
-  generate_series(1,3) AS i;
-```
+CTEはこのように問い合わせを部品に分解することで、可読性の向上、責任所在の明確化、再利用性を持たせることができます。
